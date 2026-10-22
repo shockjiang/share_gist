@@ -1,6 +1,6 @@
 # 机器人图像传输：原始像素与 JPEG 两种格式
 
-Oct 20, 2026（Oct 22 更新：服务端已实现，格式改由 `extra_info.image_format` 声明）
+Oct 20, 2026（Oct 22 更新：服务端已实现，格式改由 `extra_info.image_format` 声明；Oct 22 下午：UBT Agent RTC API 的 `raw:uint8:` JSON 与 `MIMG` 二进制请求体上线；Oct 22 晚：在线端点重新部署，加入客户端 RTC 前缀，图像格式不变）
 
 ## 背景与目标
 
@@ -113,7 +113,7 @@ print('jpeg q100 %.1f ms' % ms(lambda: [cv2.imencode('.jpg', i, [cv2.IMWRITE_JPE
 ```
 
 - `b64+json` 低于约 30 ms：用本文的格式即可。
-- 高于 30 ms：可以再加一种不经 base64 和 JSON 的二进制请求体（体积小 25%），属于另一项协议变更，需另行确认。
+- 高于 30 ms：改用 `MIMG` 二进制请求体（不经 base64 和 JSON，体积小约 25%），已上线，格式见 [model-api §3.2](../model-api/README.md#32-ubt-agent-rtc-api-的图像格式已上线)。按 UBT Agent RTC API 实现的客户端在 `/info` 返回 `binary_image_protocol: 1` 时本来就用它（该 API 的 RTC 不用 JPEG）。
 - 顺便确认机器人网口是否千兆：Linux 上 `cat /sys/class/net/<网口>/speed` 应为 `1000`。
 
 ## 状态与待办
@@ -122,6 +122,7 @@ print('jpeg q100 %.1f ms' % ms(lambda: [cv2.imencode('.jpg', i, [cv2.IMWRITE_JPE
 - [x] 部署（Oct 22）：当前两个在线端点都已支持 `pixel/binary`（代码 `0a9d709`）。上线后实测：同一帧分别以 JPEG 与原始像素发送，两次都返回 50 步有效动作；本机经网关的往返延迟 JPEG 约 0.10 s、原始像素约 0.13 s（多出的是 3.8 MB 请求体的传输与解析）；录制的 64 次 JPEG 请求重放全部成功，p50 约 0.09 s。
 - [x] 服务端代码（Oct 22，`a7c8c96`）：另外接受 UBT Agent RTC API 的 `raw:uint8:` / `raw:uint16:` 前缀 JSON 和 `MIMG` 二进制请求体（不经 base64 和 JSON，即下面「高于 30 ms」时要的那种），`/info` 返回 `raw_image_protocol` / `binary_image_protocol`。格式见 [model-api §3.2](../model-api/README.md#32-ubt-agent-rtc-api-的图像格式已上线)。
 - [x] 部署上述改动（Oct 22 下午，代码 `5f56636` = `0a9d709` + `a7c8c96`）：两个在线端点的 `/info` 都返回 `raw_image_protocol: 1`、`binary_image_protocol: 1`。同一帧四种格式经网关各发一次，全部返回 50 步有效动作，本机往返延迟：JPEG 0.09 s、`pixel/binary` 0.12 s、`raw:uint8:` 0.11 s、`MIMG` 二进制 0.10 s；录制的 64 次请求重放全部成功，p50 约 0.09 s。
+- [x] 重新部署（Oct 22 晚，代码 `3de61ac` = `5f56636` + 客户端 RTC 前缀）：两个在线 RTC 端点（双臂、左臂各一）图像部分没有改动，四种格式经网关复测全部返回 50 步有效动作，录制的 64 次请求重放全部成功，p50 约 0.09 s。同时 `/info` 增加 `rtc_prefix_protocol`、`rtc_timeline_protocol`，按 UBT Agent RTC API 实现的客户端（图像用 `MIMG` 或 `raw:uint8:`，动作前缀放 `extra_info.rtc`）现在可以直接接入，见 [model-api §6.1](../model-api/README.md#61-客户端前缀-rtc推荐oct-22-晚上线)。
 - [ ] 机器人上跑测速脚本（`b64+json` 是否低于 30 ms）。
 - [ ] 机器人到服务器是否全程千兆有线。
 - [ ] 联调：同一端点对比机器人端到端延迟（JPEG vs 原始像素）。
