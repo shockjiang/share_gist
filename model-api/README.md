@@ -1,6 +1,6 @@
 # 策略服务 HTTP 接口（Model API）
 
-Oct 22, 2026（本次更新：图像传输新增 `extra_info.image_format`，可发原始像素；在线模型都改为服务端 RTC）
+Oct 22, 2026（本次更新：图像传输新增 `extra_info.image_format`，可发原始像素；在线模型都改为服务端 RTC。Oct 22 下午：服务端代码新增 UBT Agent RTC API 的两种原始图像格式——`raw:uint8:` 前缀 JSON 与 `MIMG` 二进制请求体，**尚未部署**，见 §3.2）
 
 一个网关按 URL 前缀转发到各个模型服务：`http://<gateway>/<端点>/...`。所有端点的请求/回复格式**相同**，客户端换模型只改 URL 前缀。
 
@@ -59,6 +59,40 @@ GET  /<端点>/result/<ts>     # 轮询：202 = 处理中，200 = 完成（含�
 - 出错即拒绝，服务端不猜格式：`image_format` 不认识（如 `"png"`）、`shape` 不对、字节数与 `shape` 不符、base64 非法，`/submit` 都返回 **HTTP 500** 和 `{"status": "error", "message": "<原因>"}`，该请求不进入推理。
 - 旧服务端收到 `pixel/binary` 帧也返回 500。客户端可以据此回退：收到 500 就去掉 `image_format`、改回 JPEG 重发。
 - 取舍：原始像素在机器人端几乎不花时间（JPEG q100 编码实测约 160 ms），但每次请求约 2.8 MB（JSON 体 3.8 MB），**要求机器人到服务器全程千兆有线**；百兆或 Wi‑Fi 下会比 JPEG 更慢。
+
+### 3.2 UBT Agent RTC API 的图像格式（代码已完成，尚未部署）
+
+服务端代码（manifold_model `a7c8c96`）另外接受 UBT Agent RTC API 定义的两种原始图像格式。**当前在线端点还没有部署这项改动**；部署后本节会改为「已上线」。
+
+像素约定与 §3.1 的 `pixel/binary` 相同：彩色 BGR uint8 `[H, W, 3]`，深度小端 uint16 `[H, W]`，行优先、原始尺寸，客户端不缩放、不补边。
+
+**(a) raw Base64 JSON**：请求仍是 `application/json`，每帧 `data` 带前缀，**不需要** `extra_info.image_format`，可以逐帧混用。
+
+| 帧的 `data` | 含义 |
+|---|---|
+| `raw:uint8:<base64>` | 彩色原始像素，字节数 = H×W×3 |
+| `raw:uint16:<base64>` | 深度原始像素，字节数 = H×W×2 |
+| 无 `raw:` 前缀 | 按 §3.1 的 `extra_info.image_format` 处理（默认 JPEG） |
+
+彩色帧用了 `raw:uint16:`（或深度帧用了 `raw:uint8:`）、字节数与 `shape` 不符时，`/submit` 返回 500 和原因。
+
+**(b) 二进制请求体**：`Content-Type: application/vnd.manifold.observation.v1`，必须带 `Content-Length`。
+
+```text
+5 bytes     magic = b'MIMG\x01'
+4 bytes     JSON header 长度 L，uint32 big-endian
+L bytes     UTF-8 JSON header：其余字段与 JSON 请求相同；每帧改为
+            {"shape":[H,W,3],"format":"bgr8"} 或 {"shape":[H,W],"format":"depth16le"}，不含 data
+剩余 bytes  像素字节，按 img_front → img_left → img_right → img_front_depth → img_left_depth → img_right_depth 拼接
+```
+
+- 限制：header ≤ 1 MiB，整个请求体 ≤ 64 MiB，每个维度 1..4096；三路彩色帧数相同，深度三路都为空或与彩色帧数相同；字节数与 `shape` 完全匹配，无多余尾部字节。
+- 出错返回 **HTTP 400** 和 `{"status": "error", "message": "<原因>"}`，请求不进入推理。
+- 比 raw Base64 JSON 少一次 base64，请求体小约 25%（3 路 640×480 约 2.8 MB）。
+
+**`GET /info`**：在原有字段（`height`、`width`、`infer_count`、`request_obs_num`、`request_obs_interval`）之外增加 `"raw_image_protocol": 1`、`"binary_image_protocol": 1`，客户端可据此选择格式。
+
+**与 UBT Agent RTC API 的差别**：我们只采纳了图像格式。该 API 还要求 `/info` 返回 `rtc_prefix_protocol`、`rtc_timeline_protocol`，并由客户端在 `extra_info.rtc` 里发送动作前缀；本服务的 RTC 由服务端按 `timestamp` 计算前缀（§6.1），不提供这两项，所以按该 API 实现的 Agent 目前还不能直接接入。
 
 ## 4. 回复体（`GET /result/<ts>` → 200）
 

@@ -120,6 +120,8 @@ print('jpeg q100 %.1f ms' % ms(lambda: [cv2.imencode('.jpg', i, [cv2.IMWRITE_JPE
 
 - [x] 服务端实现与测试（`44d59c3`）。
 - [x] 部署（Oct 22）：当前两个在线端点都已支持 `pixel/binary`（代码 `0a9d709`）。上线后实测：同一帧分别以 JPEG 与原始像素发送，两次都返回 50 步有效动作；本机经网关的往返延迟 JPEG 约 0.10 s、原始像素约 0.13 s（多出的是 3.8 MB 请求体的传输与解析）；录制的 64 次 JPEG 请求重放全部成功，p50 约 0.09 s。
+- [x] 服务端代码（Oct 22，`a7c8c96`）：另外接受 UBT Agent RTC API 的 `raw:uint8:` / `raw:uint16:` 前缀 JSON 和 `MIMG` 二进制请求体（不经 base64 和 JSON，即下面「高于 30 ms」时要的那种），`/info` 返回 `raw_image_protocol` / `binary_image_protocol`。格式见 [model-api §3.2](../model-api/README.md#32-ubt-agent-rtc-api-的图像格式代码已完成尚未部署)。
+- [ ] 部署上述改动到在线端点（尚未部署）。
 - [ ] 机器人上跑测速脚本（`b64+json` 是否低于 30 ms）。
 - [ ] 机器人到服务器是否全程千兆有线。
 - [ ] 联调：同一端点对比机器人端到端延迟（JPEG vs 原始像素）。
