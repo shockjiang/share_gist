@@ -1,6 +1,6 @@
 # 策略服务 HTTP 接口（Model API）
 
-Oct 22, 2026（本次更新：图像传输新增 `extra_info.image_format`，可发原始像素；在线模型都改为服务端 RTC。Oct 22 下午：服务端代码新增 UBT Agent RTC API 的两种原始图像格式——`raw:uint8:` 前缀 JSON 与 `MIMG` 二进制请求体，**尚未部署**，见 §3.2）
+Oct 22, 2026（本次更新：图像传输新增 `extra_info.image_format`，可发原始像素；在线模型都改为服务端 RTC。Oct 22 下午：服务端代码新增 UBT Agent RTC API 的两种原始图像格式——`raw:uint8:` 前缀 JSON 与 `MIMG` 二进制请求体，Oct 22 下午已部署到两个在线端点，见 §3.2）
 
 一个网关按 URL 前缀转发到各个模型服务：`http://<gateway>/<端点>/...`。所有端点的请求/回复格式**相同**，客户端换模型只改 URL 前缀。
 
@@ -52,8 +52,8 @@ GET  /<端点>/result/<ts>     # 轮询：202 = 处理中，200 = 完成（含�
 |---|---|---|---|---|
 | JPEG（默认） | JSON | base64(JPEG) | 什么都不用加 | ✅ 已上线 |
 | 原始像素 base64 | JSON | base64(原始像素) | `extra_info.image_format = "pixel/binary"`（名字里的 binary 指像素未压缩，传输仍是 base64 JSON） | ✅ 已上线 |
-| 原始像素 base64（UBT Agent RTC API 写法） | JSON | `raw:uint8:<base64>` / `raw:uint16:<base64>` | 前缀本身，逐帧 | 代码完成，待部署（§3.2a） |
-| 原始像素二进制 | `MIMG` 二进制 | 无（像素字节接在 header 后） | `Content-Type: application/vnd.manifold.observation.v1` | 代码完成，待部署（§3.2b） |
+| 原始像素 base64（UBT Agent RTC API 写法） | JSON | `raw:uint8:<base64>` / `raw:uint16:<base64>` | 前缀本身，逐帧 | 已上线（§3.2a） |
+| 原始像素二进制 | `MIMG` 二进制 | 无（像素字节接在 header 后） | `Content-Type: application/vnd.manifold.observation.v1` | 已上线（§3.2b） |
 
 - 两种原始像素 base64 写法解出的图像完全相同；新客户端推荐用 `raw:uint8:` 前缀（自描述、与 UBT Agent RTC API 一致）。
 - 二进制比 base64 JSON 请求体小约 25%，省掉 base64 编解码；不在乎这点开销就用 base64。
@@ -74,9 +74,9 @@ GET  /<端点>/result/<ts>     # 轮询：202 = 处理中，200 = 完成（含�
 - 旧服务端收到 `pixel/binary` 帧也返回 500。客户端可以据此回退：收到 500 就去掉 `image_format`、改回 JPEG 重发。
 - 取舍：原始像素在机器人端几乎不花时间（JPEG q100 编码实测约 160 ms），但每次请求约 2.8 MB（JSON 体 3.8 MB），**要求机器人到服务器全程千兆有线**；百兆或 Wi‑Fi 下会比 JPEG 更慢。
 
-### 3.2 UBT Agent RTC API 的图像格式（代码已完成，尚未部署）
+### 3.2 UBT Agent RTC API 的图像格式（已上线）
 
-服务端代码（manifold_model `a7c8c96`）另外接受 UBT Agent RTC API 定义的两种原始图像格式。**当前在线端点还没有部署这项改动**；部署后本节会改为「已上线」。
+服务端代码（manifold_model `a7c8c96`）另外接受 UBT Agent RTC API 定义的两种原始图像格式。Oct 22 下午已部署到两个在线端点（代码 `5f56636`）；`/info` 返回 `raw_image_protocol: 1` 与 `binary_image_protocol: 1` 即表示支持。更早部署的服务没有这两个字段。
 
 像素约定与 §3.1 的 `pixel/binary` 相同：彩色 BGR uint8 `[H, W, 3]`，深度小端 uint16 `[H, W]`，行优先、原始尺寸，客户端不缩放、不补边。
 
