@@ -1,6 +1,6 @@
 # 策略服务 HTTP 接口（Model API）
 
-Oct 22, 2026（本次更新：图像传输新增 `extra_info.image_format`，可发原始像素；在线模型都改为服务端 RTC。Oct 22 下午：服务端代码新增 UBT Agent RTC API 的两种原始图像格式——`raw:uint8:` 前缀 JSON 与 `MIMG` 二进制请求体，Oct 22 下午已部署到两个在线端点，见 §3.2）
+Oct 22, 2026（本次更新：图像传输新增 `extra_info.image_format`，可发原始像素；在线模型都改为服务端 RTC。Oct 22 下午：服务端代码新增 UBT Agent RTC API 的两种原始图像格式——`raw:uint8:` 前缀 JSON 与 `MIMG` 二进制请求体，Oct 22 下午已部署到两个在线端点，见 §3.2。Oct 22 晚：RTC 前缀改由客户端给出——客户端在 `extra_info.rtc` 里发它已承诺执行的 N 行，服务端原样作为条件，不再估计延迟，已上线，见 §6.1）
 
 一个网关按 URL 前缀转发到各个模型服务：`http://<gateway>/<端点>/...`。所有端点的请求/回复格式**相同**，客户端换模型只改 URL 前缀。
 
@@ -36,13 +36,13 @@ GET  /<端点>/result/<ts>     # 轮询：202 = 处理中，200 = 完成（含�
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `timestamp` | float | ✔ | 请求 ID，**同时是这帧观测的采集时间（秒）**。正常单调递增；**比上一次小 = 新回合**（§6）。RTC 用相邻两次的差值算动作衔接（§6.1），所以必须是真实时间、单位秒 |
+| `timestamp` | float | ✔ | 请求 ID，**同时是这帧观测的采集时间（秒）**。正常单调递增；**比上一次小 = 新回合**（§6）。不带 `extra_info.rtc` 的旧客户端，服务端用相邻两次的差值估计 RTC 前缀（§6.2），所以必须是真实时间、单位秒 |
 | `prompt` | string | ✖ | 服务端忽略 |
 | `img_front` / `img_left` / `img_right` | list[frame] | ✔ | 头部 / 左腕 / 右腕相机，服务端只取最后一帧。帧格式见 §3.1 |
 | `left_arm_joint_state` / `right_arm_joint_state` | list[list[8]] | ✔ | 7 关节（弧度，绝对值）+ 1 夹爪宽度；只取最后一帧。单臂模型用右臂当前值保持右臂 |
 | `img_*_depth` / `*_joint_velocity` / `*_joint_effort` / `*_end_pose` | list | ✖ | 空表即可 |
 | `is_euler` | bool | ✖ | 默认 false |
-| `extra_info` | object | ✖ | 上行自由 JSON（对象或其 JSON 字符串）。服务端读其中的 `image_format`（§3.1）和 `target_bbox`（§5.2），其余键接收但不使用 |
+| `extra_info` | object | ✖ | 上行自由 JSON（对象或其 JSON 字符串）。服务端读其中的 `image_format`（§3.1）、`target_bbox`（§5.2）和 `rtc`（§6.1），其余键接收但不使用 |
 
 ### 图像传输方式一览
 
@@ -106,7 +106,7 @@ L bytes     UTF-8 JSON header：其余字段与 JSON 请求相同；每帧改为
 
 **`GET /info`**：在原有字段（`height`、`width`、`infer_count`、`request_obs_num`、`request_obs_interval`）之外增加 `"raw_image_protocol": 1`、`"binary_image_protocol": 1`，客户端可据此选择格式。
 
-**与 UBT Agent RTC API 的差别**：我们只采纳了图像格式。该 API 还要求 `/info` 返回 `rtc_prefix_protocol`、`rtc_timeline_protocol`，并由客户端在 `extra_info.rtc` 里发送动作前缀；本服务的 RTC 由服务端按 `timestamp` 计算前缀（§6.1），不提供这两项，所以按该 API 实现的 Agent 目前还不能直接接入。
+**与 UBT Agent RTC API 的关系**：图像格式（本节）和客户端动作前缀（§6.1）都已实现。在线的 RTC 端点 `/info` 返回 `rtc_prefix_protocol: 1`、`rtc_timeline_protocol: 1`、`rtc_max_prefix_steps: 10`，按该 API 实现的 Agent 可以直接接入。
 
 ## 4. 回复体（`GET /result/<ts>` → 200）
 
@@ -114,7 +114,7 @@ L bytes     UTF-8 JSON header：其余字段与 JSON 请求相同；每帧改为
 |---|---|---|
 | `timestamp` | float | 回显请求的 `timestamp` |
 | `gen_action_rate` | int | 50 |
-| `left_arm_actions` / `right_arm_actions` | list[50] | 每项 `{"joint_state": [8], "joint_velocity": [], "joint_effort": [], "end_pose": [], "is_euler": false}`；`joint_state` = 7 关节绝对目标（弧度）+ 1 夹爪。行 0 对应请求那帧观测的时刻，之后按 30 fps |
+| `left_arm_actions` / `right_arm_actions` | list[50] | 每项 `{"joint_state": [8], "joint_velocity": [], "joint_effort": [], "end_pose": [], "is_euler": false}`；`joint_state` = 7 关节绝对目标（弧度）+ 1 夹爪，按 30 fps。带 `extra_info.rtc` 的请求：行 `[0:N]` 就是客户端发来的前缀（逐值相同），行 `[N:50]` 是新预测（§6.1）；否则行 0 对应请求那帧观测的时刻 |
 | `ctrl_mode` | int | 2（关节位置控制） |
 | `extra_info` | object | **可选**，见 §5。没有可回显的内容时整个键不出现 |
 
@@ -126,6 +126,7 @@ L bytes     UTF-8 JSON header：其余字段与 JSON 请求相同；每帧改为
 
 | 键 | 类型 | 出现在 | 含义 |
 |---|---|---|---|
+| `rtc_timeline` / `rtc_prefix_steps` | string / int | 请求带 `extra_info.rtc` 时 | 回显 `"published_steps_v1"` 和本次前缀行数 N |
 | `target_bbox` | 见右 | 带目标框叠加的端点 | 本次画在腕部图上、送进模型的框（像素 `[x1, y1, x2, y2]`），没画框为 `null`。单腕模型：一个框；双腕模型：长度 2 的列表 `[左腕框, 右腕框]`，每项可单独为 `null` |
 | `skill` / `model_skill` / `phase_progress` / `skill_probs` | | 带技能头的端点（当前在线的都没有） | 技能名、技能头估计、进度 0~1、各技能概率 |
 
@@ -169,7 +170,37 @@ L bytes     UTF-8 JSON header：其余字段与 JSON 请求相同；每帧改为
 
 所以开始新回合的方法是让 `timestamp` 回退。
 
-### 6.1 服务端 RTC
+### 6.1 客户端前缀 RTC（推荐，Oct 22 晚上线）
+
+延迟由客户端自己测：它最清楚观测采集、编码、网络和等待回复各花了多久，以及实际发布到了第几步。服务端只接收客户端发来的动作，**全部**作为条件，不做任何估计。
+
+请求的 `extra_info.rtc`：
+
+| 字段 | 内容 |
+|---|---|
+| `timeline` | 固定 `"published_steps_v1"` |
+| `prefix_steps` | 整数 N，`1..rtc_max_prefix_steps`（当前 10，即模型训练时的最大前缀） |
+| `left_actions` / `right_actions` | 各 `N × 8`，客户端已承诺执行的绝对关节目标（7 关节弧度 + 夹爪），顺序同 `joint_state` |
+
+- 服务端把这 N 行（双臂模型用两臂，单臂模型用左臂）换算到模型空间后作为固定前缀（`inference_delay = N`），模型从第 N 行起续写。
+- 回复行 `[0:N]` 与请求前缀**逐值相同**，行 `[N:50]` 是新预测；客户端从第 N 行接着执行。单臂模型的右臂：`[0:N]` 为客户端的右臂前缀，之后保持在其最后一行。
+- 回复 `extra_info` 回显 `rtc_timeline`、`rtc_prefix_steps`。
+- `extra_info.rtc` 不合法（`timeline` 不对、N 越界或不是整数、行数或维度不符、NaN/Inf）时，`/submit` 返回 HTTP 500 和原因，该请求不进入推理。JSON 与 `MIMG` 二进制请求体相同。
+- 服务端不依赖 `timestamp` 的差值，也不再按自己的耗时丢行或另算前缀。
+
+```mermaid
+sequenceDiagram
+    participant R as 机器人
+    participant S as 策略服务
+    Note over R: 自测延迟，选定已承诺的 N 行
+    R->>S: submit(观测, extra_info.rtc = N 行)
+    Note over R: 执行这 N 行
+    S->>S: N 行作固定前缀，模型续写到 50 行
+    S-->>R: result(行 0..N-1 = 前缀原值, 行 N..49 = 新预测)
+    Note over R: 从第 N 行接着执行
+```
+
+### 6.2 服务端估计 RTC（旧客户端，不带 `extra_info.rtc` 时）
 
 不改协议，客户端约定如下：
 
