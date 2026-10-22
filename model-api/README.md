@@ -14,12 +14,12 @@ GPU 为 24 GB 4090，同时最多 2 个服务在线。端点名另行告知。
 
 | 模型 | 手臂 / 状态维 | 动作 | 目标框叠加 | 回复 `extra_info` | 图像格式 |
 |---|---|---|---|---|---|
-| 双臂 pi05 + 训练式 RTC | 双臂，16D（每臂 7 关节 + 夹爪） | 左右各 50×8 | 两个腕部各画面积最大的框（YOLO，不跟踪） | `target_bbox` = `[左腕框, 右腕框]` | `jpeg/base64`、`pixel/binary` |
-| 左臂 pi05 RECAP + 训练式 RTC | 左臂，8D | 左臂 50×8；右臂保持观测值 | 左腕目标框（YOLO + 跟踪） | `target_bbox` = 左腕框 | `jpeg/base64`、`pixel/binary` |
+| 双臂 pi05 + 训练式 RTC | 双臂，16D（每臂 7 关节 + 夹爪） | 左右各 50×8 | 两个腕部各画面积最大的框（YOLO，不跟踪） | `target_bbox` = `[左腕框, 右腕框]` | base64 JSON（JPEG 或原始像素），见 §3 一览 |
+| 左臂 pi05 RECAP + 训练式 RTC | 左臂，8D | 左臂 50×8；右臂保持观测值 | 左腕目标框（YOLO + 跟踪） | `target_bbox` = 左腕框 | base64 JSON（JPEG 或原始像素），见 §3 一览 |
 
 - 两者都没有技能头，都**没有**空闲超时重置（§6）。
 - prompt 由服务端固定为训练时的值（形如 `pick the red and white box, place it on the tray operator=<name>`），请求里的 `prompt` 被忽略。
-- `pixel/binary` 只有 Oct 22 及之后部署的服务支持；更早的服务收到它返回 HTTP 500（§3.1）。
+- 原始像素 base64（`extra_info.image_format = "pixel/binary"`）只有 Oct 22 及之后部署的服务支持；更早的服务收到它返回 HTTP 500（§3.1）。
 
 ## 2. 调用流程
 
@@ -43,6 +43,20 @@ GET  /<端点>/result/<ts>     # 轮询：202 = 处理中，200 = 完成（含�
 | `img_*_depth` / `*_joint_velocity` / `*_joint_effort` / `*_end_pose` | list | ✖ | 空表即可 |
 | `is_euler` | bool | ✖ | 默认 false |
 | `extra_info` | object | ✖ | 上行自由 JSON（对象或其 JSON 字符串）。服务端读其中的 `image_format`（§3.1）和 `target_bbox`（§5.2），其余键接收但不使用 |
+
+### 图像传输方式一览
+
+**base64 JSON 和二进制都支持，并存，客户端任选。** 前三种都是普通的 `application/json` 请求、图像为 base64 字符串；只有最后一种是二进制请求体。
+
+| 方式 | 请求体 | 帧的 `data` | 怎么声明 | 状态 |
+|---|---|---|---|---|
+| JPEG（默认） | JSON | base64(JPEG) | 什么都不用加 | ✅ 已上线 |
+| 原始像素 base64 | JSON | base64(原始像素) | `extra_info.image_format = "pixel/binary"`（名字里的 binary 指像素未压缩，传输仍是 base64 JSON） | ✅ 已上线 |
+| 原始像素 base64（UBT Agent RTC API 写法） | JSON | `raw:uint8:<base64>` / `raw:uint16:<base64>` | 前缀本身，逐帧 | 代码完成，待部署（§3.2a） |
+| 原始像素二进制 | `MIMG` 二进制 | 无（像素字节接在 header 后） | `Content-Type: application/vnd.manifold.observation.v1` | 代码完成，待部署（§3.2b） |
+
+- 两种原始像素 base64 写法解出的图像完全相同；新客户端推荐用 `raw:uint8:` 前缀（自描述、与 UBT Agent RTC API 一致）。
+- 二进制比 base64 JSON 请求体小约 25%，省掉 base64 编解码；不在乎这点开销就用 base64。
 
 ### 3.1 图像帧格式（`extra_info.image_format`）
 
