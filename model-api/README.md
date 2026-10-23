@@ -1,6 +1,6 @@
 # 策略服务 HTTP 接口（Model API）
 
-Oct 22, 2026（本次更新：图像传输新增 `extra_info.image_format`，可发原始像素；在线模型都改为服务端 RTC。Oct 22 下午：服务端代码新增 UBT Agent RTC API 的两种原始图像格式——`raw:uint8:` 前缀 JSON 与 `MIMG` 二进制请求体，Oct 22 下午已部署到两个在线端点，见 §3.2。Oct 22 晚：RTC 前缀改由客户端给出——客户端在 `extra_info.rtc` 里发它已承诺执行的 N 行，服务端原样作为条件，不再估计延迟，已上线，见 §6.1）
+Oct 22, 2026（本次更新：图像传输新增 `extra_info.image_format`，可发原始像素；在线模型都改为服务端 RTC。Oct 22 下午：服务端代码新增 UBT Agent RTC API 的两种原始图像格式——`raw:uint8:` 前缀 JSON 与 `MIMG` 二进制请求体，Oct 22 下午已部署到两个在线端点，见 §3.2。Oct 22 晚：RTC 前缀改由客户端给出——客户端在 `extra_info.rtc` 里发它已承诺执行的 N 行，服务端原样作为条件，不再估计延迟，已上线，见 §6.1。Oct 23 晚：回复新增 `extra_info.yolo`——每条手臂的“是否夹着箱子 / 当前技能 / 技能内进度”，来自腕部 YOLO 而不是策略模型，见 §5.5）
 
 一个网关按 URL 前缀转发到各个模型服务：`http://<gateway>/<端点>/...`。所有端点的请求/回复格式**相同**，客户端换模型只改 URL 前缀。
 
@@ -14,10 +14,10 @@ GPU 为 24 GB 4090，同时最多 2 个服务在线。端点名另行告知。
 
 | 模型 | 手臂 / 状态维 | 动作 | 目标框叠加 | 回复 `extra_info` | 图像格式 |
 |---|---|---|---|---|---|
-| 双臂 pi05 + 训练式 RTC | 双臂，16D（每臂 7 关节 + 夹爪） | 左右各 50×8 | 两个腕部各画面积最大的框（YOLO，不跟踪） | `target_bbox` = `[左腕框, 右腕框]` | base64 JSON（JPEG 或原始像素），见 §3 一览 |
-| 左臂 pi05 RECAP + 训练式 RTC | 左臂，8D | 左臂 50×8；右臂保持观测值 | 左腕目标框（YOLO + 跟踪） | `target_bbox` = 左腕框 | base64 JSON（JPEG 或原始像素），见 §3 一览 |
+| 双臂 pi05 + 训练式 RTC | 双臂，16D（每臂 7 关节 + 夹爪） | 左右各 50×8 | 两个腕部各画面积最大的框（YOLO，不跟踪） | `target_bbox` = `[左腕框, 右腕框]`；`hold_prob` / `holding`（§5.1）；`yolo` 含 `left`、`right`（§5.5） | 见 §3 一览（四种都支持） |
+| 左臂 pi05 + 训练式 RTC | 左臂，8D | 左臂 50×8；右臂保持观测值 | 左腕目标框（YOLO + 跟踪） | `target_bbox` = 左腕框；`yolo` 含 `left`（§5.5） | 见 §3 一览（四种都支持） |
 
-- 两者都没有技能头，都**没有**空闲超时重置（§6）。
+- 两者都**没有**空闲超时重置（§6）。回复里的技能、进度、是否夹持一律看 `yolo`（§5.5）。
 - prompt 由服务端固定为训练时的值（形如 `pick the red and white box, place it on the tray operator=<name>`），请求里的 `prompt` 被忽略。
 - 原始像素 base64（`extra_info.image_format = "pixel/binary"`）只有 Oct 22 及之后部署的服务支持；更早的服务收到它返回 HTTP 500（§3.1）。
 
@@ -128,7 +128,9 @@ L bytes     UTF-8 JSON header：其余字段与 JSON 请求相同；每帧改为
 |---|---|---|---|
 | `rtc_timeline` / `rtc_prefix_steps` | string / int | 请求带 `extra_info.rtc` 时 | 回显 `"published_steps_v1"` 和本次前缀行数 N |
 | `target_bbox` | 见右 | 带目标框叠加的端点 | 本次画在腕部图上、送进模型的框（像素 `[x1, y1, x2, y2]`），没画框为 `null`。单腕模型：一个框；双腕模型：长度 2 的列表 `[左腕框, 右腕框]`，每项可单独为 `null` |
-| `skill` / `model_skill` / `phase_progress` / `skill_probs` | | 带技能头的端点（当前在线的都没有） | 技能名、技能头估计、进度 0~1、各技能概率 |
+| `yolo` | object | 配了腕部 YOLO 辅助模型的端点（当前两个在线端点都有） | 每条手臂：是否夹着箱子、当前技能、技能内进度，见 §5.5 |
+| `hold_prob` / `holding` | float / bool（双腕为长度 2 的列表） | 另配了夹持判别头的双腕端点 | 旧的夹持读数，只看左腕，右腕恒为 `null`。保留是为了兼容，新客户端请用 `yolo` |
+| `skill` / `model_skill` / `phase_progress` / `skill_probs` | | 带技能头、且**没有** `yolo` 的端点（当前在线的都不发） | 策略模型的技能名、技能头估计、进度 0~1、各技能概率。端点有 `yolo` 时这四个键不出现 |
 
 ### 5.2 `target_bbox`
 
@@ -160,6 +162,35 @@ L bytes     UTF-8 JSON header：其余字段与 JSON 请求相同；每帧改为
 - 忽略不认识的键。
 - `target_bbox` 为 `null` 时不要沿用上一次的框当作模型看到的框。
 - 双腕模型的 `target_bbox` 是列表的列表；可以看第一个元素是不是列表来区分。
+
+### 5.5 `yolo`：夹持 / 技能 / 进度（Oct 23 晚上线）
+
+来源是一个独立的腕部 YOLO 模型（检测器 + 技能 / 进度 / 夹持三个小头），**不是**策略模型。每次请求、在画目标框之前，用该手臂腕部相机的原图和该手臂当前状态（7 关节 + 夹爪宽度 + 左右臂标记）各算一次；只看当前一帧，不带历史。
+
+```json
+"extra_info": {
+  "yolo": {
+    "left":  {"hold": true,  "hold_prob": 0.9277, "skill": "carry",    "skill_prob": 0.969, "progress": 0.7415},
+    "right": {"hold": false, "hold_prob": 0.0312, "skill": "wait_safe", "skill_prob": 0.882, "progress": 0.8051}
+  }
+}
+```
+
+| 字段 | 类型 | 含义 |
+|---|---|---|
+| `left` / `right` | object | 端点控制哪几条手臂就有哪几个键：双臂模型两个都有，左臂模型只有 `left` |
+| `hold` | bool | 是否夹着箱子，即 `hold_prob >= 0.5` |
+| `hold_prob` | float 0~1 | 夹持概率 |
+| `skill` | string | 概率最大的技能，取值见下 |
+| `skill_prob` | float 0~1 | 该技能的概率（17 类 softmax） |
+| `progress` | float 0~1 | 当前技能内的进度 |
+
+`skill` 的取值（17 类）：`global_observe`、`approach`、`focus`、`close_to`、`close_gripper`、`wait_close`、`lift`、`carry`、`open_gripper`、`wait_open`、`to_safe`、`wait_safe`、`return`、`wait`、`lift_recovery`、`hesitate`、`other`。
+
+注意：
+- 读数逐帧独立，会抖动；需要稳定状态时请在客户端做平滑或连续 N 帧确认。
+- 已知问题：用录制数据测试时，空闲不动的右臂也读出 `hold: true`（0.6–0.85）；左臂在 `global_observe` 时偶尔也读出夹持。在进一步验证之前，`hold` 请只作参考，尤其是右臂。
+- 耗时：每次请求多约 10–15 ms。
 
 ## 6. 回合（episode）规则
 
