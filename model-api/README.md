@@ -1,6 +1,6 @@
 # 策略服务 HTTP 接口（Model API）
 
-Oct 22, 2026（本次更新：图像传输新增 `extra_info.image_format`，可发原始像素；在线模型都改为服务端 RTC。Oct 22 下午：服务端代码新增 UBT Agent RTC API 的两种原始图像格式——`raw:uint8:` 前缀 JSON 与 `MIMG` 二进制请求体，Oct 22 下午已部署到两个在线端点，见 §3.2。Oct 22 晚：RTC 前缀改由客户端给出——客户端在 `extra_info.rtc` 里发它已承诺执行的 N 行，服务端原样作为条件，不再估计延迟，已上线，见 §6.1。Oct 23 晚：回复新增 `extra_info.yolo`——每条手臂的“是否夹着箱子 / 当前技能 / 技能内进度”，来自腕部 YOLO 而不是策略模型，见 §5.5）
+Oct 22, 2026（本次更新：图像传输新增 `extra_info.image_format`，可发原始像素；在线模型都改为服务端 RTC。Oct 22 下午：服务端代码新增 UBT Agent RTC API 的两种原始图像格式——`raw:uint8:` 前缀 JSON 与 `MIMG` 二进制请求体，Oct 22 下午已部署到两个在线端点，见 §3.2。Oct 22 晚：RTC 前缀改由客户端给出——客户端在 `extra_info.rtc` 里发它已承诺执行的 N 行，服务端原样作为条件，不再估计延迟，已上线，见 §6.1。Oct 23 晚：回复新增 `extra_info.yolo`——每条手臂的“是否夹着箱子 / 当前技能 / 技能内进度”，来自腕部 YOLO 而不是策略模型，见 §5.5。Oct 24：腕部 YOLO 换成统一模型，`yolo` 每条手臂新增夹爪与箱子的关系 `contact`（hold / hit / other）及三类概率 `contact_probs`，见 §5.5）
 
 一个网关按 URL 前缀转发到各个模型服务：`http://<gateway>/<端点>/...`。所有端点的请求/回复格式**相同**，客户端换模型只改 URL 前缀。
 
@@ -163,15 +163,16 @@ L bytes     UTF-8 JSON header：其余字段与 JSON 请求相同；每帧改为
 - `target_bbox` 为 `null` 时不要沿用上一次的框当作模型看到的框。
 - 双腕模型的 `target_bbox` 是列表的列表；可以看第一个元素是不是列表来区分。
 
-### 5.5 `yolo`：夹持 / 技能 / 进度（Oct 23 晚上线）
+### 5.5 `yolo`：夹持 / 接触 / 技能 / 进度（Oct 23 晚上线，Oct 24 加接触）
 
-来源是一个独立的腕部 YOLO 模型（检测器 + 技能 / 进度 / 夹持三个小头），**不是**策略模型。每次请求、在画目标框之前，用该手臂腕部相机的原图和该手臂当前状态（7 关节 + 夹爪宽度 + 左右臂标记）各算一次；只看当前一帧，不带历史。
+来源是一个独立的腕部 YOLO 模型（Oct 24 起为统一模型：检测器 + 技能 / 进度 / 接触 / 目标框几个小头），**不是**策略模型。每次请求、在画目标框之前，用该手臂腕部相机的原图和该手臂当前状态（7 关节 + 夹爪宽度 + 左右臂标记）各算一次；只看当前一帧，不带历史。
 
 ```json
 "extra_info": {
   "yolo": {
-    "left":  {"hold": true,  "hold_prob": 0.9277, "skill": "carry",    "skill_prob": 0.969, "progress": 0.7415},
-    "right": {"hold": false, "hold_prob": 0.0312, "skill": "wait_safe", "skill_prob": 0.882, "progress": 0.8051}
+    "left": {"hold": false, "hold_prob": 0.0, "skill": "focus", "skill_prob": 0.5321, "progress": 0.2747,
+             "contact": "hit", "contact_prob": 0.958,
+             "contact_probs": {"other": 0.042, "hold": 0.0, "hit": 0.958}}
   }
 }
 ```
@@ -184,12 +185,18 @@ L bytes     UTF-8 JSON header：其余字段与 JSON 请求相同；每帧改为
 | `skill` | string | 概率最大的技能，取值见下 |
 | `skill_prob` | float 0~1 | 该技能的概率（17 类 softmax） |
 | `progress` | float 0~1 | 当前技能内的进度 |
+| `contact` | string | 夹爪与箱子的关系，三类取概率最大的：`hold` = 夹着箱子；`hit` = 手指（张开或闭合的指尖）碰到/压到箱子但没夹住；`other` = 其他（没碰到箱子） |
+| `contact_prob` | float 0~1 | `contact` 那一类的概率 |
+| `contact_probs` | object | 三类各自的概率 `{"other", "hold", "hit"}`，三者相加为 1（四舍五入到 4 位） |
 
 `skill` 的取值（17 类）：`global_observe`、`approach`、`focus`、`close_to`、`close_gripper`、`wait_close`、`lift`、`carry`、`open_gripper`、`wait_open`、`to_safe`、`wait_safe`、`return`、`wait`、`lift_recovery`、`hesitate`、`other`。
 
 注意：
 - 读数逐帧独立，会抖动；需要稳定状态时请在客户端做平滑或连续 N 帧确认。
-- 已知问题：用录制数据测试时，空闲不动的右臂也读出 `hold: true`（0.6–0.85）；左臂在 `global_observe` 时偶尔也读出夹持。在进一步验证之前，`hold` 请只作参考，尤其是右臂。
+- `contact` 三个键只在统一模型的端点出现（Oct 24 起两个左臂在线端点都有）；没有这三个键时说明端点还是旧模型，请按“键缺失 = 不提供”处理。
+- `hold` / `hold_prob` 与 `contact_probs.hold` 来自同一个接触头，两者一致；新客户端建议直接读 `contact`。
+- 离线评测（留出录制，原图 640×480）：接触三类平衡准确率 0.93，`hit` 精度 0.80 / 召回 0.80，`hold` 准确率 0.999；技能准确率 0.78，进度平均误差 0.20。
+- 旧模型（Oct 23）的已知问题——空闲右臂读出 `hold: true`——在统一模型上尚未在双臂端点复测。
 - 耗时：每次请求多约 10–15 ms。
 
 ## 6. 回合（episode）规则
