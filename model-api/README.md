@@ -128,7 +128,7 @@ L bytes     UTF-8 JSON header：其余字段与 JSON 请求相同；每帧改为
 |---|---|---|---|
 | `rtc_timeline` / `rtc_prefix_steps` | string / int | 请求带 `extra_info.rtc` 时 | 回显 `"published_steps_v1"` 和本次前缀行数 N |
 | `target_bbox` | 见右 | 带目标框叠加的端点 | 本次画在腕部图上、送进模型的框（像素 `[x1, y1, x2, y2]`），没画框为 `null`。单腕模型：一个框；双腕模型：长度 2 的列表 `[左腕框, 右腕框]`，每项可单独为 `null` |
-| `yolo` | object | 配了腕部 YOLO 辅助模型的端点（当前两个在线端点都有） | 每条手臂：是否夹着箱子、当前技能、技能内进度，见 §5.5 |
+| `yolo` | object | 配了腕部 YOLO 辅助模型的端点（当前两个在线端点都有） | 每条手臂：是否夹着箱子、夹爪与箱子的关系（hold / hit / other 及概率）、当前技能、技能内进度，见 §5.5 |
 | `hold_prob` / `holding` | float / bool（双腕为长度 2 的列表） | 另配了夹持判别头的双腕端点 | 旧的夹持读数，只看左腕，右腕恒为 `null`。保留是为了兼容，新客户端请用 `yolo` |
 | `skill` / `model_skill` / `phase_progress` / `skill_probs` | | 带技能头、且**没有** `yolo` 的端点（当前在线的都不发） | 策略模型的技能名、技能头估计、进度 0~1、各技能概率。端点有 `yolo` 时这四个键不出现 |
 
