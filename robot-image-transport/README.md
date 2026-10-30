@@ -2,6 +2,8 @@
 
 Oct 20, 2026（Oct 22 更新：服务端已实现，格式改由 `extra_info.image_format` 声明；Oct 22 下午：UBT Agent RTC API 的 `raw:uint8:` JSON 与 `MIMG` 二进制请求体上线；Oct 22 晚：在线端点重新部署，加入客户端 RTC 前缀，图像格式不变）
 
+> Oct 30 更新：机器人改为只编码一次 JPEG、以 `MIMG` 二进制 JPEG 块直接发送（左腕先发），见 [rtc-v2-jpeg](../rtc-v2-jpeg/README.md) 与 [model-api §3.2c](../model-api/README.md)。
+
 ## 背景与目标
 
 结论先行：请求在 `extra_info.image_format` 里声明图像格式。`"jpeg/base64"` 是默认值；`"pixel/binary"` 表示**原始像素**（不做 JPEG、不缩放、不补边）。不带这个字段的旧客户端照常工作。

@@ -1,6 +1,6 @@
 # 策略服务 HTTP 接口（Model API）
 
-Oct 22, 2026（本次更新：图像传输新增 `extra_info.image_format`，可发原始像素；在线模型都改为服务端 RTC。Oct 22 下午：服务端代码新增 UBT Agent RTC API 的两种原始图像格式——`raw:uint8:` 前缀 JSON 与 `MIMG` 二进制请求体，Oct 22 下午已部署到两个在线端点，见 §3.2。Oct 22 晚：RTC 前缀改由客户端给出——客户端在 `extra_info.rtc` 里发它已承诺执行的 N 行，服务端原样作为条件，不再估计延迟，已上线，见 §6.1。Oct 23 晚：回复新增 `extra_info.yolo`——每条手臂的“是否夹着箱子 / 当前技能 / 技能内进度”，来自腕部 YOLO 而不是策略模型，见 §5.5。Oct 24：腕部 YOLO 换成统一模型，`yolo` 每条手臂新增夹爪与箱子的关系 `contact`（hold / hit / other）及三类概率 `contact_probs`，见 §5.5）
+Oct 22, 2026（本次更新：图像传输新增 `extra_info.image_format`，可发原始像素；在线模型都改为服务端 RTC。Oct 22 下午：服务端代码新增 UBT Agent RTC API 的两种原始图像格式——`raw:uint8:` 前缀 JSON 与 `MIMG` 二进制请求体，Oct 22 下午已部署到两个在线端点，见 §3.2。Oct 22 晚：RTC 前缀改由客户端给出——客户端在 `extra_info.rtc` 里发它已承诺执行的 N 行，服务端原样作为条件，不再估计延迟，已上线，见 §6.1。Oct 23 晚：回复新增 `extra_info.yolo`——每条手臂的“是否夹着箱子 / 当前技能 / 技能内进度”，来自腕部 YOLO 而不是策略模型，见 §5.5。Oct 24：腕部 YOLO 换成统一模型，`yolo` 每条手臂新增夹爪与箱子的关系 `contact`（hold / hit / other）及三类概率 `contact_probs`，见 §5.5。Oct 30：`MIMG` 二进制请求体新增 JPEG 原始字节图像块与 `image_order`（左腕先发），见 §3.2c 与 [rtc-v2-jpeg](../rtc-v2-jpeg/README.md)）
 
 一个网关按 URL 前缀转发到各个模型服务：`http://<gateway>/<端点>/...`。所有端点的请求/回复格式**相同**，客户端换模型只改 URL 前缀。
 
@@ -54,6 +54,7 @@ GET  /<端点>/result/<ts>     # 轮询：202 = 处理中，200 = 完成（含�
 | 原始像素 base64 | JSON | base64(原始像素) | `extra_info.image_format = "pixel/binary"`（名字里的 binary 指像素未压缩，传输仍是 base64 JSON） | ✅ 已上线 |
 | 原始像素 base64（UBT Agent RTC API 写法） | JSON | `raw:uint8:<base64>` / `raw:uint16:<base64>` | 前缀本身，逐帧 | 已上线（§3.2a） |
 | 原始像素二进制 | `MIMG` 二进制 | 无（像素字节接在 header 后） | `Content-Type: application/vnd.manifold.observation.v1` | 已上线（§3.2b） |
+| JPEG 二进制（云端 RTC_v2） | `MIMG` 二进制 | 无（JPEG 原始字节接在 header 后，不做 Base64） | 同上，帧描述 `"format": "jpeg"` + `nbytes` | 服务端已实现，端点逐步切换（§3.2c） |
 
 - 两种原始像素 base64 写法解出的图像完全相同；新客户端推荐用 `raw:uint8:` 前缀（自描述、与 UBT Agent RTC API 一致）。
 - 二进制比 base64 JSON 请求体小约 25%，省掉 base64 编解码；不在乎这点开销就用 base64。
@@ -104,7 +105,22 @@ L bytes     UTF-8 JSON header：其余字段与 JSON 请求相同；每帧改为
 - 出错返回 **HTTP 400** 和 `{"status": "error", "message": "<原因>"}`，请求不进入推理。
 - 比 raw Base64 JSON 少一次 base64，请求体小约 25%（3 路 640×480 约 2.8 MB）。
 
-**`GET /info`**：在原有字段（`height`、`width`、`infer_count`、`request_obs_num`、`request_obs_interval`）之外增加 `"raw_image_protocol": 1`、`"binary_image_protocol": 1`，客户端可据此选择格式。
+**(c) 二进制 JPEG 块与 `image_order`（Oct 30）**：同一个 `MIMG` 请求体里，彩色帧可以发 JPEG 原始字节，机器人只编码一次 JPEG，不做 Base64。
+
+```text
+5 bytes     magic = b'MIMG\x01'
+4 bytes     JSON header 长度 L，uint32 big-endian
+L bytes     UTF-8 JSON header；彩色帧描述 {"shape":[H,W,3],"format":"jpeg","nbytes":N}，
+            另带 "image_order": ["img_left","img_front","img_right"]
+剩余 bytes  按 image_order 拼接的 JPEG 原始字节（左腕 → 头部 → 右腕），然后是深度块（如有）
+```
+
+- `image_order` 可选，三个彩色相机名各一次；不带时为旧顺序 front → left → right。**推荐左腕在前**：服务端收到左腕块就开始左腕检测与视觉编码，头部、右腕此时仍在上传。
+- `format` 为 `jpeg` 或 `bgr8`，同一请求可混用；`nbytes` 为 JPEG 块的精确字节数；JPEG 解码（BGR）后必须正好是 `shape`。
+- 解码后图片合计 ≤ 64 MiB；其余限制与 (b) 相同。出错返回 **HTTP 400** 和原因，请求不进入推理。
+- 完整客户端协议（RTC_v2：相机缓存、时间对齐、提交与领取规则）：[rtc-v2-jpeg](../rtc-v2-jpeg/README.md)。
+
+**`GET /info`**：在原有字段（`height`、`width`、`infer_count`、`request_obs_num`、`request_obs_interval`）之外增加 `"raw_image_protocol": 1`、`"binary_image_protocol": 1`；支持 (c) 的服务另有 `"binary_jpeg_protocol": 1`。客户端可据此选择格式。
 
 **与 UBT Agent RTC API 的关系**：图像格式（本节）和客户端动作前缀（§6.1）都已实现。在线的 RTC 端点 `/info` 返回 `rtc_prefix_protocol: 1`、`rtc_timeline_protocol: 1`、`rtc_max_prefix_steps: 10`，按该 API 实现的 Agent 可以直接接入。
 
