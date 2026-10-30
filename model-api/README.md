@@ -54,7 +54,7 @@ GET  /<端点>/result/<ts>     # 轮询：202 = 处理中，200 = 完成（含�
 | 原始像素 base64 | JSON | base64(原始像素) | `extra_info.image_format = "pixel/binary"`（名字里的 binary 指像素未压缩，传输仍是 base64 JSON） | ✅ 已上线 |
 | 原始像素 base64（UBT Agent RTC API 写法） | JSON | `raw:uint8:<base64>` / `raw:uint16:<base64>` | 前缀本身，逐帧 | 已上线（§3.2a） |
 | 原始像素二进制 | `MIMG` 二进制 | 无（像素字节接在 header 后） | `Content-Type: application/vnd.manifold.observation.v1` | 已上线（§3.2b） |
-| JPEG 二进制（云端 RTC_v2） | `MIMG` 二进制 | 无（JPEG 原始字节接在 header 后，不做 Base64） | 同上，帧描述 `"format": "jpeg"` + `nbytes` | 服务端已实现，端点逐步切换（§3.2c） |
+| JPEG 二进制（云端 RTC_v2） | `MIMG` 二进制 | 无（JPEG 原始字节接在 header 后，不做 Base64） | 同上，帧描述 `"format": "jpeg"` + `nbytes` | ✅ 已上线（§3.2c；`/info` 有 `binary_jpeg_protocol` 的端点） |
 
 - 两种原始像素 base64 写法解出的图像完全相同；新客户端推荐用 `raw:uint8:` 前缀（自描述、与 UBT Agent RTC API 一致）。
 - 二进制比 base64 JSON 请求体小约 25%，省掉 base64 编解码；不在乎这点开销就用 base64。
