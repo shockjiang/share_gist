@@ -44,7 +44,7 @@ MIMG\x01 | JSON 字节数（4 字节，大端） | UTF-8 JSON | left JPEG | fron
 - `shape`：解码后的 BGR uint8 HWC 形状，H/W 均为 1..4096；JPEG 解码结果必须正好是这个形状。
 - `format`：`"jpeg"`（本协议）或 `"bgr8"`（原图，字节数 = H×W×3）；同一请求里可以混用。
 - `nbytes`：该 JPEG 块的精确字节数（`format: "jpeg"` 时必填）。
-- 图片块为 JPEG 原始字节，不做 Base64。深度数组为空（若发深度，`depth16le` 块排在全部彩色块之后，顺序固定为 front、left、right）。其他观测和 RTC 字段不变。
+- 图片块为 JPEG 原始字节，不做 Base64。深度可选（若发深度，`depth8` / `depth16le` 块排在全部彩色块之后，顺序固定为 front、left、right；左腕 `uint8` 毫米深度见 [rtc-v2-depth](../rtc-v2-depth/README.md)）。其他观测和 RTC 字段不变。
 - 限制：JSON 头 ≤ 1 MiB；整个请求 ≤ 64 MiB；解码后图片合计 ≤ 64 MiB；包末尾不允许额外字节。
 
 JSON 头其余字段（数组外层均为当前单帧，不是历史窗口）：
@@ -61,7 +61,7 @@ JSON 头其余字段（数组外层均为当前单帧，不是历史窗口）：
 | `waist_joint_state/velocity/effort` | [[1 个数]] | waist_yaw_joint |
 | `leg_joint_state/velocity/effort` | [[3 个数]] | lifter_pitch_1_joint、lifter_pitch_2_joint、lifter_pitch_3_joint |
 | `img_front/img_left/img_right` | [{shape,format,nbytes}] | 每路一个 JPEG 描述，无 data 字段 |
-| `img_front_depth/img_left_depth/img_right_depth` | [] | 当前不传深度 |
+| `img_front_depth/img_left_depth/img_right_depth` | [] 或 [{shape,format}] | 可选；左腕 `depth8`（uint8 毫米，截到 255）见 [rtc-v2-depth](../rtc-v2-depth/README.md) |
 | `image_order` | [3 个相机名] | 图像块顺序，RTC_v2 固定发 `["img_left","img_front","img_right"]` |
 | `extra_info.rtc` | object | RTC 承诺前缀，结构如下 |
 

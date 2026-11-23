@@ -40,7 +40,8 @@ GET  /<端点>/result/<ts>     # 轮询：202 = 处理中，200 = 完成（含�
 | `prompt` | string | ✖ | 服务端忽略 |
 | `img_front` / `img_left` / `img_right` | list[frame] | ✔ | 头部 / 左腕 / 右腕相机，服务端只取最后一帧。帧格式见 §3.1 |
 | `left_arm_joint_state` / `right_arm_joint_state` | list[list[8]] | ✔ | 7 关节（弧度，绝对值）+ 1 夹爪宽度；只取最后一帧。单臂模型用右臂当前值保持右臂 |
-| `img_*_depth` / `*_joint_velocity` / `*_joint_effort` / `*_end_pose` | list | ✖ | 空表即可 |
+| `img_left_depth` | list[frame] | ✖ | **可选**左腕深度图（Nov 23）：`uint8 [H, W]`，毫米，`min(深度_mm, 255)`，0 = 无深度，与 `img_left` 逐像素对齐；`/info` 有 `depth8_protocol: 1` 才发。见 [rtc-v2-depth](../rtc-v2-depth/README.md) |
+| `img_front_depth` / `img_right_depth` / `*_joint_velocity` / `*_joint_effort` / `*_end_pose` | list | ✖ | 空表即可 |
 | `is_euler` | bool | ✖ | 默认 false |
 | `extra_info` | object | ✖ | 上行自由 JSON（对象或其 JSON 字符串）。服务端读其中的 `image_format`（§3.1）、`target_bbox`（§5.2）和 `rtc`（§6.1），其余键接收但不使用 |
 
